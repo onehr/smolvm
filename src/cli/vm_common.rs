@@ -660,7 +660,45 @@ fn control_socket_path(name: &str) -> std::path::PathBuf {
 pub fn enable_forkable_env(name: &str) {
     std::env::set_var("SMOLVM_FORKABLE", "1");
     std::env::set_var("SMOLVM_CONTROL_SOCKET", control_socket_path(name));
+    std::env::set_var("SMOLVM_GUEST_RAM_OWNER", guest_ram_owner_fragment(name));
 }
+
+fn guest_ram_owner_fragment(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for b in name.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-') {
+            out.push(b as char);
+        } else {
+            out.push('_');
+        }
+    }
+    if out.is_empty() {
+        "unowned".to_string()
+    } else {
+        out
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn cleanup_machine_guest_ram_files(name: &str) {
+    let dir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
+    let prefix = format!("smolvm-guest-ram-{}-", guest_ram_owner_fragment(name));
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if file_name.starts_with(&prefix) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn cleanup_machine_guest_ram_files(_name: &str) {}
 
 /// Send a single line command to a VM control socket and return its reply line.
 fn control_socket_cmd(sock: &std::path::Path, cmd: &str) -> smolvm::Result<String> {
@@ -1715,6 +1753,7 @@ pub fn delete_vm(name: &str, force: bool, options: DeleteVmOptions) -> smolvm::R
             tracing::warn!(error = %e, "Failed to remove VM data directory: {}", data_dir.display());
         }
     }
+    cleanup_machine_guest_ram_files(name);
 
     println!("Deleted machine: {}", name);
     Ok(())
@@ -2278,6 +2317,13 @@ mod init_runner_tests {
             "my-vm",
         );
         assert_eq!(config.persistent_overlay_id.as_deref(), Some("my-vm"));
+    }
+
+    #[test]
+    fn guest_ram_owner_fragment_is_single_filename_component() {
+        assert_eq!(guest_ram_owner_fragment("vm_1.a-b"), "vm_1.a-b");
+        assert_eq!(guest_ram_owner_fragment("vm/one two"), "vm_one_two");
+        assert_eq!(guest_ram_owner_fragment(""), "unowned");
     }
 
     #[test]
