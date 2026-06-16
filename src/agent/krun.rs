@@ -22,6 +22,8 @@ pub struct KrunFunctions {
     pub free_ctx: unsafe extern "C" fn(u32),
     pub set_vm_config: unsafe extern "C" fn(u32, u8, u32) -> i32,
     pub set_root: unsafe extern "C" fn(u32, *const libc::c_char) -> i32,
+    /// Attach an operator-signed effect policy to all FS shares. Optional: older libkrun lacks it.
+    pub set_fs_policy: Option<unsafe extern "C" fn(u32, *const libc::c_char) -> i32>,
     pub set_workdir: unsafe extern "C" fn(u32, *const libc::c_char) -> i32,
     pub set_exec: unsafe extern "C" fn(
         u32,
@@ -144,6 +146,7 @@ impl KrunFunctions {
             free_ctx: load_sym!(krun_free_ctx),
             set_vm_config: load_sym!(krun_set_vm_config),
             set_root: load_sym!(krun_set_root),
+            set_fs_policy: load_optional_sym!("krun_set_fs_policy"),
             set_workdir: load_sym!(krun_set_workdir),
             set_exec: load_sym!(krun_set_exec),
             set_port_map: load_sym!(krun_set_port_map),

@@ -352,6 +352,7 @@ pub fn launch_agent_vm(config: &LaunchConfig<'_>) -> Result<()> {
         let krun_add_virtiofs = krun.add_virtiofs;
         let krun_add_virtiofs3 = krun.add_virtiofs3;
         let krun_start_enter = krun.start_enter;
+        let krun_set_fs_policy = krun.set_fs_policy;
         let krun_disable_implicit_vsock = krun.disable_implicit_vsock;
         let krun_add_vsock = krun.add_vsock;
 
@@ -1069,6 +1070,29 @@ pub fn launch_agent_vm(config: &LaunchConfig<'_>) -> Result<()> {
                     {
                         tracing::warn!(error = %e, "egress-refresh spawn failed");
                     }
+                }
+            }
+        }
+
+        // Attach the operator-signed FS effect policy, if configured, now that every share (root +
+        // volumes) has been added. The path is sourced from NEX_FS_POLICY, which the _boot-vm inherits
+        // from its parent. Fail-closed: a configured policy the host-side daemon cannot load or verify
+        // makes the VM fail to start, so it never boots with the policy silently unenforced.
+        if let Some(krun_set_fs_policy) = krun_set_fs_policy {
+            if let Ok(policy_path) = std::env::var("NEX_FS_POLICY") {
+                if !policy_path.is_empty() {
+                    let c_policy = CString::new(policy_path.as_str()).map_err(|_| {
+                        Error::agent("set fs policy", "policy path contains a null byte")
+                    })?;
+                    let rc = krun_set_fs_policy(ctx, c_policy.as_ptr());
+                    if rc < 0 {
+                        krun_free_ctx(ctx);
+                        return Err(Error::agent(
+                            "set fs policy",
+                            format!("krun_set_fs_policy returned {rc}"),
+                        ));
+                    }
+                    tracing::info!(policy = %policy_path, "FS effect policy attached to all shares");
                 }
             }
         }
