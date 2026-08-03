@@ -1,3 +1,7 @@
+# Pinned, not floating. A floating channel means a rebuild silently changes compilers, which is how the
+# provenance of the shipped libkrun.dylib was lost: the compiler that produced the known-good FS-gate
+# binary (lib/libkrun.dylib, sha256 a1e64d59...) was never recorded and that binary can no longer be
+# reproduced, only preserved. See lib/BUILD_PROVENANCE.md before changing this line.
 [toolchain]
-channel = "stable"
+channel = "1.94.0"
 components = ["rustfmt", "clippy"]
