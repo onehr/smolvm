@@ -79,6 +79,39 @@ will be blamed for the unexplained S6 regression until this is run:
 
 Timebox this to one day. An ambiguous result counts as a failure for planning purposes.
 
+### RESULT, 2026-08-03: PASS. Rust work is not blocked.
+
+Built libkrun at the pre-S6 commit `b9e3745` with the now-pinned rustc 1.94.0 and `BLK=1 NET=1`
+(matching the deployed binary's shape, **not** the `GPU=1` in the repo's `build-libkrun` task, which
+has never been what shipped). Result: `23b682d4...`, 5,943,472 bytes — FS gate present, no S6 epoch
+strings, no GPU links.
+
+It does **not** byte-reproduce `a1e64d59...` (5,927,056 bytes), which is expected: a different
+compiler. That is not the question the bisect asks.
+
+Swapped it in and ran the full fork -> probe -> pause live test, which exercises the exact symptom S6
+regressed ("the fork's runner never came online"). **It passed**, including *"the forked world booted
+(a live, separate gated agent)"*, the original being paused only after the fork's gate probe returned
+OK, and the serving epoch advancing 0 -> 1. The deployed binary was restored afterwards; `lib/` is
+untouched.
+
+**Conclusions.**
+
+1. **Toolchain drift is not the cause.** A fresh build with today's pinned compiler, at the commit
+   that produced the known-good binary, yields a working binary with live forks.
+2. **The S6 fork-liveness regression is S6's own code.** The remaining suspect stands:
+   `epoch_guard` (`passthrough.rs:935`) calls `read_epoch_file` (`:952`), a synchronous
+   `std::fs::read_to_string`, on **every write-capable `open`** (`:1789`) — a blocking host filesystem
+   read on the single-threaded FUSE hot path, during runner boot. The fix is to read the epoch once
+   into an atomic refreshed by a watcher, not per-`open`.
+3. **Everything downstream is unblocked**: the DAX `setupmapping` guard, `(ip, port, proto)` TSI
+   granularity, the signed egress-denial journal, FS shadow mode, and the Linux port were all
+   scheduled behind an unexplained build failure that does not exist.
+
+A rebuilt binary is now known to be viable and reproducible, which the preserved one is not. Promoting
+the rebuild to the deployed binary is reasonable but should clear the full live suite first, not just
+the fork test.
+
 ## Off-repo backup
 
 A copy of every binary above, plus a `git bundle --all` of the whole repository (which preserves the
